@@ -7,26 +7,36 @@
 //********************************************************************************************
 
 using System;
-using System.IO;
+using Newtonsoft.Json;
 
 namespace Cliver
 {
     /// <summary>
-    /// A property of this type is implicitly encrypted when it is a member of a Settings class.
+    /// A field/property of this type is implicitly encrypted when it is a member of a Settings class.
     /// </summary>
     /// <typeparam name="T"></typeparam>
-    public class Encrypted<T> where T : class
+    //[JsonConverter(typeof(EncryptedConverter))]
+    public class Encrypted<T> /*: EncryptedBase*/ where T : class
     {
-        /// <summary>
-        /// Encypted value used while serializing. 
-        /// It must not be called from the custom code.
-        /// </summary>
-        public string _Value { get; set; } = null;
+        public Encrypted()
+        {
+        }
+
+        public Encrypted(T value)
+        {
+            Value = value;
+        }
 
         /// <summary>
-        /// Decrypted value that is to be used in the custom code.
+        /// Encypted value. It must not be called from the custom code.
         /// </summary>
-        [Newtonsoft.Json.JsonIgnore]
+        [JsonProperty]//forces serialization for private 
+        string _Value { get; set; } = null;
+
+        /// <summary>
+        /// Decrypted value to be used in the custom code.
+        /// </summary>
+        [JsonIgnore]
         public T Value
         {
             get
@@ -35,7 +45,7 @@ namespace Cliver
                     return null;
                 try
                 {
-                    string s = crypto.Decrypt(_Value);
+                    string s = endec.Decrypt(_Value);
                     if (typeof(T) == typeof(string))
                         return s as T;
                     return Serialization.Json.Deserialize<T>(s);
@@ -53,55 +63,88 @@ namespace Cliver
                 else
                 {
                     if (typeof(T) == typeof(string))
-                        _Value = crypto.Encrypt(value as string);
+                        _Value = endec.Encrypt(value as string);
                     else
-                        _Value = crypto.Encrypt(Serialization.Json.Serialize(value));
+                        _Value = endec.Encrypt(Serialization.Json.Serialize(value));
                 }
             }
         }
 
-        public void Initialize(IStringCrypto crypto)
+        public void Initialize(StringEndec endec)
         {
-            if (crypto != null)
-                throw new Exception("Crypto engine is already initialized and cannot be re-set.");
-            _crypto = crypto;
+            if (endec != null)
+                throw new Exception("StringEndec instance is already set and cannot be re-set.");
+            _endec = endec;
         }
-        IStringCrypto crypto
+        StringEndec endec
         {
-            get { return _crypto != null ? _crypto : defaultCrypto;}
+            get
+            {
+                StringEndec c = _endec != null ? _endec : defaultEndec;
+                if (c == null)
+                    throw new Exception("StringEndec instance is not set. It can be done by either Initialize() or InitializeDefault() of Cliver.Encrypted class.");
+                return c;
+            }
         }
-        IStringCrypto _crypto;
+        StringEndec _endec;
 
-        static public void InitializeDefault(IStringCrypto crypto)
+        static public void InitializeDefault(StringEndec endec)
         {
-            if (defaultCrypto != null)
-                throw new Exception("Default Crypto engine is already initialized and cannot be re-set.");
-            defaultCrypto = crypto;
+            if (defaultEndec != null)
+                throw new Exception("Default StringEndec instance is already set and cannot be re-set.");
+            defaultEndec = endec;
         }
-        static IStringCrypto defaultCrypto;
+        static StringEndec defaultEndec;
     }
+    /*public abstract class EncryptedBase
+    {
+        internal string _Value { get; set; } = null;
+    }
+    public class EncryptedConverter : JsonConverter
+    {
+        public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer)
+        {
+            EncryptedBase e = (EncryptedBase)value;
+            writer.WriteValue(e._Value);
+        }
 
-    public abstract class IStringCrypto
+        public override object ReadJson(JsonReader reader, Type objectType, object existingValue, JsonSerializer serializer)
+        {
+            object e = existingValue != null ? existingValue : Activator.CreateInstance(objectType);
+            ((EncryptedBase)e)._Value = (string)reader.Value;
+            return existingValue;
+        }
+
+        public override bool CanConvert(Type objectType)
+        {
+            return objectType == typeof(Encrypted<>);
+        }
+    }*/
+
+    /// <summary>
+    /// Abstract string encrypting/decrypting class
+    /// </summary>
+    public abstract class StringEndec
     {
         public abstract string Encrypt(string s);
         public abstract string Decrypt(string s);
 
-        public class Rijndael : IStringCrypto
+        public class Rijndael : StringEndec
         {
             public Rijndael(string key)
             {
-                crypto = new Cliver.Crypto.Rijndael(key);
+                endec = new Cliver.Crypto.Rijndael(key);
             }
-            Crypto.Rijndael crypto;
+            Crypto.Rijndael endec;
 
             override public string Encrypt(string s)
             {
-                return crypto.Encrypt(s);
+                return endec.Encrypt(s);
             }
 
             override public string Decrypt(string s)
             {
-                return crypto.Decrypt(s);
+                return endec.Decrypt(s);
             }
         }
     }
